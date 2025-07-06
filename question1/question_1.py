@@ -1,11 +1,14 @@
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+import seaborn as sns
+import os
 plt.rcParams['font.family'] = 'STSong'
+os.chdir(os.path.dirname(os.path.abspath(__file__))) 
 
 # 数据读取和预处理
 
-df_sorts = pd.read_excel("附件C1.xlsx")
+df_sorts = pd.read_excel("../附件C1.xlsx")
 df_data1 = pd.read_excel("附件C2题目1处理.xlsx")
 # 空白
 
@@ -52,9 +55,8 @@ plt.bar(x,y)
 plt.title('种类-销量分布柱状图')
 plt.xlabel('种类')
 plt.ylabel('销量')
-plt.show()
+plt.savefig('种类-销量分布柱状图.png')
 
-# 不同年份下的各个种类每月销量统计
 # 基本数据分析
 data = []
 for year_idx in range(3):
@@ -70,20 +72,54 @@ for year_idx in range(3):
             
 df = pd.DataFrame(data)
 
-# 先计算标准统计量
-basic_stats = df.groupby('分类名称')['销量'].agg(
-    mean='mean',
-    std='std',
-    max='max',
-    min='min',
-    kurt=pd.Series.kurt,
-    skew=pd.Series.skew
+basic_stats = df.groupby('分类名称', as_index=False).agg(
+    平均值=('销量', 'mean'),
+    标准差=('销量', 'std'),
+    最大值=('销量', 'max'),
+    最小值=('销量', 'min'),
+    峰度=('销量', lambda x: x.kurtosis()),
+    偏度=('销量', 'skew')
 )
-
 cv_stats = df.groupby('分类名称')['销量'].apply(
     lambda x: np.std(x)/np.mean(x) if np.mean(x) != 0 else np.nan
-).rename('变异系数')
+).reset_index(name='变异系数')
+yearly_stats = pd.merge(basic_stats, cv_stats, on='分类名称')
+csv_path = "销量统计分析结果.csv"
+yearly_stats.to_csv(csv_path, 
+                 index=False,
+                 encoding='utf-8-sig')
 
-yearly_stats = pd.concat([basic_stats, cv_stats], axis=1)
-yearly_stats.columns = ['平均值', '标准差', '最大值', '最小值', '峰度', '偏度', '变异系数']
-print(yearly_stats)
+# 不同分类月销量
+# 月总销量箱线图
+plt.figure(figsize=(10, 6))
+sns.boxplot(data=df, x='月份', y='销量')
+plt.title('各月份总销量分布对比')
+plt.savefig('月度总销量箱线图.png')
+
+# 研究分析不同品类销售量相互作用
+df_pivot = df.pivot_table(
+    index=['年份', '月份'], 
+    columns='分类名称',      
+    values='销量',         
+    aggfunc='sum'        
+)
+
+# 计算皮尔逊和斯皮尔曼矩阵
+pearson_corr = df_pivot.corr(method="pearson")
+spearman_corr = df_pivot.corr(method="spearman")
+
+# 对比两者的差异
+diff = (pearson_corr - spearman_corr).abs().mean().mean()
+print(f"皮尔逊和斯皮尔曼平均差异: {diff:.3f}")
+
+if diff > 0.2:  # 如果差异较大，选择斯皮尔曼
+    final_corr = spearman_corr
+    print("皮尔逊和斯皮尔曼差异较大，推荐使用斯皮尔曼！")
+else:
+    final_corr = pearson_corr
+    print("皮尔逊和斯皮尔曼接近，使用皮尔逊即可。")
+
+# 可视化最终选择的矩阵
+sns.heatmap(final_corr, annot=True, cmap="coolwarm", vmin=-1, vmax=1)
+plt.title("相关系数矩阵")
+plt.savefig('不同分类相关系数矩阵.png')
